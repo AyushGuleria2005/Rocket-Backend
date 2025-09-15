@@ -4,6 +4,13 @@ import dotenv from "dotenv";
 import { dbConnect } from "./config/db.js";
 import cors from "cors";
 import multer from "multer";
+import fs from "fs";
+
+//RAG
+import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
+import { GoogleGenerativeAIEmbeddings } from "@langchain/google-genai";
+import { TaskType } from "@google/generative-ai";
+import { QdrantVectorStore } from "@langchain/qdrant";
 
 // Importing Models
 import { College } from "./models/college.js";
@@ -16,7 +23,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
-// ✅ CORS configuration
+// Cors config
 app.use(
   cors({
     origin: "http://localhost:5173",
@@ -24,38 +31,60 @@ app.use(
   })
 );
 
-// ✅ Use memoryStorage to save files in MongoDB (not on disk)
-const storage = multer.memoryStorage();
+// Storage
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}_${file.originalname}`);
+  },
+});
 const upload = multer({ storage });
 
-// ---------------- ROUTES ----------------
-
-// ✅ Upload document
-app.post("/upload", upload.array("pdfFiles"), async (req, res) => {
+// Upload document API
+app.post("/upload", upload.array("files"), async (req, res) => {
   try {
-    const { text } = req.body;
-    const files = req.files;
-
-    console.log("Text:", text);
-    console.log("Files:", files);
-
-    const document = new Document({
-      text,
-      docs: files.map((file) => ({
-        data: file.buffer, // raw binary
-        name: file.originalname,
-        type: file.mimetype,
-        size: file.size,
-      })),
+    const pdfs = req.files;
+    const {text} = req.body;
+    const pdfPathList = pdfs.map((pdf) => {
+      return pdf.path;
     });
+    console.log(pdfPathList);
 
-    await document.save();
-    res.send("Document saved successfully 🚀");
+    // Chunking each pdf file using path
+    for (const path of pdfPathList) {
+      //Chunking Logic
+      const loader = new PDFLoader(path);
+      const docs = await loader.load();
+
+      // Chunks -> Vector embedding model
+      const embeddings = new GoogleGenerativeAIEmbeddings({
+        apiKey: process.env.GEMINI_API_KEY,
+        model: "text-embedding-004", // 768 dimensions
+        taskType: TaskType.RETRIEVAL_DOCUMENT,
+        title: "Document title",
+      });
+
+      const vectorStore = await QdrantVectorStore.fromDocuments(
+        docs,
+        embeddings,
+        {
+          url: "http://localhost:6333",
+          collectionName: `${text}-collection`,
+        }
+      );
+
+      console.log("Indexing of documents done 🥳");
+    }
+    res.send("Everything fine");
   } catch (err) {
     console.error("Upload error:", err.message);
     res.status(500).send("Error saving document");
   }
 });
+
+
 
 // ✅ Download document
 app.get("/downloadDoc/:docId/:docIndex", async (req, res) => {
@@ -81,7 +110,7 @@ app.get("/downloadDoc/:docId/:docIndex", async (req, res) => {
   }
 });
 
-// ✅ Signup APIs
+// ✅ Signup API
 app.post("/collegeSignup", async (req, res) => {
   try {
     const collegeObj = { college_name: "Ramrao Adik Institute of Technology" };
@@ -93,6 +122,7 @@ app.post("/collegeSignup", async (req, res) => {
   }
 });
 
+// User Signup API
 app.post("/signup", async (req, res) => {
   try {
     const user = new User(req.body);
