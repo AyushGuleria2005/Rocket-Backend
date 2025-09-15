@@ -1,15 +1,16 @@
 import mongoose from "mongoose";
 
-const documentSchema = mongoose.Schema({
+const documentSchema = new mongoose.Schema({
   text: {
     type: String,
     required: true,
   },
   docs: [
     {
-      data: Buffer,          // raw PDF binary
-      contentType: String,   // e.g. 'application/pdf'
-      fileName: String,      // original file name
+      data: { type: Buffer, required: true },   // raw PDF binary
+      name: { type: String, required: true },   // file name
+      type: { type: String, required: true },   // mimetype
+      size: { type: Number, required: true },   // file size
     },
   ],
 });

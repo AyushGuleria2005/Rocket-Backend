@@ -1,83 +1,116 @@
 import express from "express";
 import mongoose from "mongoose";
-import fs from "fs";
 import dotenv from "dotenv";
 import { dbConnect } from "./config/db.js";
+import cors from "cors";
+import multer from "multer";
 
-//Importing Models
+// Importing Models
 import { College } from "./models/college.js";
 import { User } from "./models/user.js";
 import { Document } from "./models/document.js";
 
-dotenv.config({
-  path: "./.env",
-});
+dotenv.config({ path: "./.env" });
 
 const app = express();
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
-// Loading pdf
-const pdf1 = fs.readFileSync("pdf1.pdf");
+// ✅ CORS configuration
+app.use(
+  cors({
+    origin: "http://localhost:5173",
+    methods: ["GET", "POST", "PATCH", "DELETE"],
+  })
+);
 
-//API to upload document
-app.post("/documentUpload", async (req, res) => {
-  const docObj = {
-    text: "Tommorow is Holiday",
-    docs: [{ data: pdf1, contentType: "application/pdf", fileName: "pdf1.pdf" }],
-  };
-  //We will create an instance of Document Model
-  const document = new Document(docObj);
-  await document.save();
-  res.send("Document saved successfully");
-});
+// ✅ Use memoryStorage to save files in MongoDB (not on disk)
+const storage = multer.memoryStorage();
+const upload = multer({ storage });
 
-//Api to read saved documents
-app.get("/downloadDoc/:docId/:docIndex", async (req, res) => {
+// ---------------- ROUTES ----------------
+
+// ✅ Upload document
+app.post("/upload", upload.array("pdfFiles"), async (req, res) => {
   try {
-    const { docId,docIndex } = req.params;
-    const documentFind = await Document.findById(docId);
-    if(!documentFind || !documentFind.docs[docIndex]){
-      throw new Error("No pdf found");
-    }
-    const pdfFound = documentFind.docs[docIndex];
-    console.log(pdfFound.fileName)
-    res.set({
-      "Content-Type":`${pdfFound.contentType}`,
-      "Content-Disposition":`attachment; filename=${pdfFound.fileName}`
-    })
-    res.send(pdfFound.data);
+    const { text } = req.body;
+    const files = req.files;
+
+    console.log("Text:", text);
+    console.log("Files:", files);
+
+    const document = new Document({
+      text,
+      docs: files.map((file) => ({
+        data: file.buffer, // raw binary
+        name: file.originalname,
+        type: file.mimetype,
+        size: file.size,
+      })),
+    });
+
+    await document.save();
+    res.send("Document saved successfully 🚀");
   } catch (err) {
-    console.error(err.message);
+    console.error("Upload error:", err.message);
+    res.status(500).send("Error saving document");
   }
 });
 
-app.post("/CollegeSignup", async (req, res) => {
-  const collegeObj = {
-    college_name: "Ramrao Adik Institute of Technology",
-  };
-  //We create an instance of College model
-  const college = new College(collegeObj);
-  college.save();
-  res.send("College saved successfully in DB");
+// ✅ Download document
+app.get("/downloadDoc/:docId/:docIndex", async (req, res) => {
+  try {
+    const { docId, docIndex } = req.params;
+    const documentFind = await Document.findById(docId);
+
+    if (!documentFind || !documentFind.docs[docIndex]) {
+      return res.status(404).send("No PDF found");
+    }
+
+    const pdfFound = documentFind.docs[docIndex];
+
+    res.set({
+      "Content-Type": pdfFound.type,
+      "Content-Disposition": `attachment; filename=${pdfFound.name}`,
+    });
+
+    res.send(pdfFound.data);
+  } catch (err) {
+    console.error("Download error:", err.message);
+    res.status(500).send("Error downloading document");
+  }
+});
+
+// ✅ Signup APIs
+app.post("/collegeSignup", async (req, res) => {
+  try {
+    const collegeObj = { college_name: "Ramrao Adik Institute of Technology" };
+    const college = new College(collegeObj);
+    await college.save();
+    res.send("College saved successfully in DB");
+  } catch (err) {
+    res.status(500).send("Error saving college");
+  }
 });
 
 app.post("/signup", async (req, res) => {
-  const studentObj = req.body;
-  console.log(req.body);
-  //We will create an instance of User Model
-  const user = new User(studentObj);
-  await user.save();
-  res.send("User saved successfully in DB");
+  try {
+    const user = new User(req.body);
+    await user.save();
+    res.send("User saved successfully in DB");
+  } catch (err) {
+    res.status(500).send("Error saving user");
+  }
 });
 
+// ✅ Connect to DB and start server
 dbConnect()
   .then(() => {
     console.log("Database connection established 🥳");
     app.listen(PORT, () => {
-      console.log("App is running at port ", PORT);
+      console.log("App is running at port", PORT);
     });
   })
   .catch((error) => {
-    console.error("Database connection failed 😣");
+    console.error("Database connection failed 😣", error);
   });
