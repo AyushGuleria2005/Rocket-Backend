@@ -107,7 +107,7 @@ app.post("/chat", async (req, res) => {
     embeddings,
     {
       url: "http://localhost:6333",
-      collectionName: "physics-collection",
+      collectionName: `np-collection`,
     }
   );
 
@@ -122,6 +122,7 @@ app.post("/chat", async (req, res) => {
   You are an College AI assistant who helps resolving student user queries based on content available to you from the pdf file with content 
   and exact PAGE NUMBER
   Only answer from the availabe context from the file 
+  Give proper stylled markdown output
   Context: ${JSON.stringify(relevantChunks)}
   `;
 
@@ -166,7 +167,7 @@ app.get("/downloadDoc/:docId/:docIndex", async (req, res) => {
 });
 
 // ✅ Signup API
-app.post("/collegeSignup", async (req, res) => {
+app.post("/college/:name", async (req, res) => {
   try {
     const collegeObj = { college_name: "Ramrao Adik Institute of Technology" };
     const college = new College(collegeObj);
