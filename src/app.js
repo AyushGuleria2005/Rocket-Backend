@@ -5,6 +5,7 @@ import { dbConnect } from "./config/db.js";
 import cors from "cors";
 import multer from "multer";
 import fs from "fs";
+import OpenAI from "openai";
 
 //RAG
 import { PDFLoader } from "@langchain/community/document_loaders/fs/pdf";
@@ -42,11 +43,16 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+const openai = new OpenAI({
+  apiKey: process.env.GEMINI_API_KEY,
+  baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+});
+
 // Upload document API
 app.post("/upload", upload.array("files"), async (req, res) => {
   try {
     const pdfs = req.files;
-    const {text} = req.body;
+    const { text } = req.body;
     const pdfPathList = pdfs.map((pdf) => {
       return pdf.path;
     });
@@ -84,7 +90,56 @@ app.post("/upload", upload.array("files"), async (req, res) => {
   }
 });
 
+//Student Chat
+app.post("/chat", async (req, res) => {
+  const userQuery = req.body.query;
 
+  // Embedding model
+  const embeddings = new GoogleGenerativeAIEmbeddings({
+    apiKey: process.env.GEMINI_API_KEY,
+    model: "text-embedding-004", // 768 dimensions
+    taskType: TaskType.RETRIEVAL_DOCUMENT,
+    title: "Document title",
+  });
+
+  // Establishing connection with vector store
+  const vectorStore = await QdrantVectorStore.fromExistingCollection(
+    embeddings,
+    {
+      url: "http://localhost:6333",
+      collectionName: "physics-collection",
+    }
+  );
+
+  //Using as a retreiver
+  const vectorSearcher = vectorStore.asRetriever({
+    k: 3, // k means how many chunks to search
+  });
+
+  const relevantChunks = await vectorSearcher.invoke(userQuery);
+
+  const SYSTEM_PROMPT = `
+  You are an College AI assistant who helps resolving student user queries based on content available to you from the pdf file with content 
+  and exact PAGE NUMBER
+  Only answer from the availabe context from the file 
+  Context: ${JSON.stringify(relevantChunks)}
+  `;
+
+  const response = await openai.chat.completions.create({
+    model: "gemini-2.5-flash",
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: userQuery,
+      },
+    ],
+  });
+
+  console.log(`🚀 ${response.choices[0].message.content}`);
+
+  res.send({answer:response.choices[0].message.content});
+});
 
 // ✅ Download document
 app.get("/downloadDoc/:docId/:docIndex", async (req, res) => {
